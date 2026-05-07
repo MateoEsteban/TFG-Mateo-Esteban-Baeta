@@ -2,7 +2,7 @@ from fastapi import FastAPI, HTTPException, status
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 import pce
-import src_v5 as src # O import src según el nombre de tu archivo exacto
+import src
 import subprocess
 
 # Contador global de la red y registro de estado
