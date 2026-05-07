@@ -13,7 +13,6 @@ def check_containers_running(required_nodes):
     """Verifica si todos los contenedores requeridos están corriendo en el host"""
     try:
         result = subprocess.run(['sudo', 'lxc-ls', '--running'], capture_output=True, text=True)
-        # Cambio vital: .split() a secas
         running_containers = result.stdout.split() if result.stdout else []
         return all(node in running_containers for node in required_nodes)
     except Exception as e:
@@ -21,7 +20,6 @@ def check_containers_running(required_nodes):
         return False
 
 app = FastAPI(title="Controlador SDN - Orquestador ZTP de Slices")
-
 app.mount("/static", StaticFiles(directory="."), name="static")
 
 @app.get("/", response_class=HTMLResponse)
@@ -74,7 +72,7 @@ async def provision_slice(peticion: dict):
         if not exito:
             raise HTTPException(status_code=500, detail="Error de SO al inyectar comandos de red.")
         
-        # REGISTRAR LA SLICE
+        # Registramos la Slice para poder borrarla luego
         active_slices[vlan_asignada] = {
             "ruta": ruta_asignada,
             "cir": req_cir_total
@@ -107,8 +105,9 @@ async def delete_slice(slice_id: str):
     # 2. Ordenar al SRC borrar las colas y túneles (Plano de Datos)
     src.eliminar_comandos_router(slice_id, ruta)
     
-    # 3. Borrar la Slice del registro activo de la API
+    # 3. Borrar la Slice del registro activo
     del active_slices[slice_id]
     
     print(f"[API] ✅ Slice {slice_id} eliminada. Recursos liberados para futuras peticiones.")
     return {"message": "Recursos liberados correctamente"}
+

@@ -128,12 +128,14 @@ def configurar_extremos_acceso(nodo_cliente, nodo_servidor, vlan_id, qos_classes
         ejecutar(nodo_servidor, cmd)
 
 def configurar_routers_borde(vlan_id, req_cir_total, qos_classes, ruta_ida_sids, ruta_vuelta_sids, req_delay_min):
-    """ Configura RG y RU mapeando a IDs de cola únicos basados en la VLAN """
+    """ Configura RG y RU mapeando a IDs de cola seguros de 3-4 caracteres """
     iface_salida_rg = "eth3" if "fcff:4::1" in ruta_ida_sids else "eth2"
     iface_salida_ru = "eth3" if "fcff:4::1" in ruta_vuelta_sids else "eth2"
     
-    # Usamos la VLAN completa como identificador para evitar chocar con la raíz 1:1
-    slice_num = int(vlan_id) 
+    # NUEVO: Extraemos los dos últimos dígitos (Ej: '01' de la VLAN '3001')
+    suffix = str(vlan_id)[-2:]
+    # Generamos un identificador base de 3 dígitos (Ej: 101, 102...) para esquivar el 1:1
+    slice_num = f"1{suffix}"
     
     cmds_rg = [
         f"ip link add link int0 name int0.{vlan_id} type vlan id {vlan_id} 2>/dev/null",
@@ -142,12 +144,9 @@ def configurar_routers_borde(vlan_id, req_cir_total, qos_classes, ruta_ida_sids,
         f"ip -6 route replace fd00:{vlan_id}:a::/64 via fd00:{vlan_id}:b::1 dev int0.{vlan_id}",
         f"ip -6 route replace fd00:{vlan_id}:d::/64 encap seg6 mode encap segs {ruta_ida_sids} dev {iface_salida_rg}",
         
-        # Clase padre de la Slice (Ej: classid 1:3001)
         f"tc class replace dev int0 parent 1:1 classid 1:{slice_num} htb rate {req_cir_total}mbit",
-        # Filtro principal. Usamos 'prio {slice_num}' para poder localizarlo y borrarlo fácilmente luego
         f"tc filter replace dev int0 protocol 802.1Q parent 1:0 prio {slice_num} flower vlan_id {vlan_id} classid 1:{slice_num}"
     ]
-    
     cmds_ru = [
         f"ip link add link int0 name int0.{vlan_id} type vlan id {vlan_id} 2>/dev/null",
         f"ip -6 addr add fd00:{vlan_id}:c::2/64 dev int0.{vlan_id} 2>/dev/null",
@@ -173,7 +172,7 @@ def configurar_routers_borde(vlan_id, req_cir_total, qos_classes, ruta_ida_sids,
         else:
             dscp_int, dscp_ext = "0x00", "0x01"
 
-        # Colas hijas únicas (Ej: 1:30011, 1:30012)
+        # Colas hijas únicas (Ej: 1:1011, 1:1012...)
         cola_hija = f"1:{slice_num}{cola_hija_idx}"
         
         cmds_rg.extend([
@@ -208,7 +207,7 @@ def configurar_routers_borde(vlan_id, req_cir_total, qos_classes, ruta_ida_sids,
         ejecutar('ru', cmd)
 
 def inyectar_comandos_router(slice_id, req_cir_total, ruta_asignada, req_delay_min, qos_classes):
-    """ Orquesta la red desde cero con colas secuenciales normales """
+    """ Orquesta la red desde cero """
     print(f"\n[SRC] === INICIANDO APROVISIONAMIENTO ZTP (Zero-Touch) ===")
     print(f"[SRC] Slice: {slice_id} | CIR Total: {req_cir_total}Mbit | Ruta: {ruta_asignada}")
     
@@ -245,30 +244,45 @@ def inyectar_comandos_router(slice_id, req_cir_total, ruta_asignada, req_delay_m
     print("[SRC] === APROVISIONAMIENTO COMPLETADO ===")
     return True
 
-# NUEVO BLOQUE: Función para limpiar el router
 def eliminar_comandos_router(slice_id, ruta_asignada):
+    """
+    Des-aprovisiona la Slice de los routers físicos.
+    Borra interfaces VLAN, rutas SRv6, filtros y colas HTB respetando la jerarquía.
+    """
     print(f"\n[SRC] === INICIANDO TERMINACIÓN DE SLICE {slice_id} ===")
     
-    # Extraemos los dos últimos dígitos de la VLAN para el borrado
+    # Identificadores hexadecimales seguros
     suffix = str(slice_id)[-2:]
     slice_num = f"1{suffix}"
     
-    # 1. Limpiar Extremos... (esto se queda igual)
+    # 1. Limpiar Extremos (Cliente gNB y Servidor UPF)
     ejecutar('rgnb', f"ip link del eth1.{slice_id} 2>/dev/null")
     ejecutar('rgnb', f"ip link del eth2.{slice_id} 2>/dev/null")
     ejecutar('rupf', f"ip link del eth1.{slice_id} 2>/dev/null")
     ejecutar('rupf', f"ip link del eth2.{slice_id} 2>/dev/null")
     
-    # 2. Limpiar Routers de Borde... (esto se queda igual)
+    # 2. Limpiar Routers de Borde (RG y RU)
     ejecutar('rg', f"ip link del int0.{slice_id} 2>/dev/null")
     ejecutar('ru', f"ip link del int0.{slice_id} 2>/dev/null")
+    
     ejecutar('rg', f"ip -6 route del fd00:{slice_id}:d::/64 2>/dev/null")
     ejecutar('ru', f"ip -6 route del fd00:{slice_id}:a::/64 2>/dev/null")
     
-    # 3. Limpiar QoS usando el nuevo slice_num de 3 dígitos
+    # 3. Limpiar QoS: El orden estricto de Linux tc HTB
+    # a) Borrar todos los filtros asociados a la Slice
     ejecutar('rg', f"tc filter del dev int0 parent 1:0 prio {slice_num} 2>/dev/null")
     ejecutar('ru', f"tc filter del dev int0 parent 1:0 prio {slice_num} 2>/dev/null")
     
+    ejecutar('rg', f"tc filter del dev int0 parent 1:{slice_num} 2>/dev/null")
+    ejecutar('ru', f"tc filter del dev int0 parent 1:{slice_num} 2>/dev/null")
+    
+    # b) NUEVO: Barrido de colas hijas PRIMERO (del 1 al 9, cubriendo todas las clases creadas)
+    for i in range(1, 10):
+        cola_hija = f"1:{slice_num}{i}"
+        ejecutar('rg', f"tc class del dev int0 classid {cola_hija} 2>/dev/null")
+        ejecutar('ru', f"tc class del dev int0 classid {cola_hija} 2>/dev/null")
+        
+    # c) NUEVO: Destruir la cola padre finalmente (ahora que está completamente vacía)
     ejecutar('rg', f"tc class del dev int0 classid 1:{slice_num} 2>/dev/null")
     ejecutar('ru', f"tc class del dev int0 classid 1:{slice_num} 2>/dev/null")
     
