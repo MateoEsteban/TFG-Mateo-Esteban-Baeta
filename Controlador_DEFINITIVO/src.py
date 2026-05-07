@@ -128,10 +128,12 @@ def configurar_extremos_acceso(nodo_cliente, nodo_servidor, vlan_id, qos_classes
         ejecutar(nodo_servidor, cmd)
 
 def configurar_routers_borde(vlan_id, req_cir_total, qos_classes, ruta_ida_sids, ruta_vuelta_sids, req_delay_min):
-    """ Configura RG y RU mapeando a IDs de cola normales infiriendo el comportamiento """
+    """ Configura RG y RU mapeando a IDs de cola únicos basados en la VLAN """
     iface_salida_rg = "eth3" if "fcff:4::1" in ruta_ida_sids else "eth2"
     iface_salida_ru = "eth3" if "fcff:4::1" in ruta_vuelta_sids else "eth2"
-    sub_clase = str(vlan_id)[-1]
+    
+    # Usamos la VLAN completa como identificador para evitar chocar con la raíz 1:1
+    slice_num = int(vlan_id) 
     
     cmds_rg = [
         f"ip link add link int0 name int0.{vlan_id} type vlan id {vlan_id} 2>/dev/null",
@@ -139,20 +141,25 @@ def configurar_routers_borde(vlan_id, req_cir_total, qos_classes, ruta_ida_sids,
         f"ip link set int0.{vlan_id} up",
         f"ip -6 route replace fd00:{vlan_id}:a::/64 via fd00:{vlan_id}:b::1 dev int0.{vlan_id}",
         f"ip -6 route replace fd00:{vlan_id}:d::/64 encap seg6 mode encap segs {ruta_ida_sids} dev {iface_salida_rg}",
-        f"tc class replace dev int0 parent 1:1 classid 1:{sub_clase} htb rate {req_cir_total}mbit",
-        f"tc filter replace dev int0 protocol 802.1Q parent 1:0 prio 1 flower vlan_id {vlan_id} classid 1:{sub_clase}"
+        
+        # Clase padre de la Slice (Ej: classid 1:3001)
+        f"tc class replace dev int0 parent 1:1 classid 1:{slice_num} htb rate {req_cir_total}mbit",
+        # Filtro principal. Usamos 'prio {slice_num}' para poder localizarlo y borrarlo fácilmente luego
+        f"tc filter replace dev int0 protocol 802.1Q parent 1:0 prio {slice_num} flower vlan_id {vlan_id} classid 1:{slice_num}"
     ]
+    
     cmds_ru = [
         f"ip link add link int0 name int0.{vlan_id} type vlan id {vlan_id} 2>/dev/null",
         f"ip -6 addr add fd00:{vlan_id}:c::2/64 dev int0.{vlan_id} 2>/dev/null",
         f"ip link set int0.{vlan_id} up",
         f"ip -6 route replace fd00:{vlan_id}:d::/64 via fd00:{vlan_id}:c::1 dev int0.{vlan_id}",
         f"ip -6 route replace fd00:{vlan_id}:a::/64 encap seg6 mode encap segs {ruta_vuelta_sids} dev {iface_salida_ru}",
-        f"tc class replace dev int0 parent 1:1 classid 1:{sub_clase} htb rate {req_cir_total}mbit",
-        f"tc filter replace dev int0 protocol 802.1Q parent 1:0 prio 1 flower vlan_id {vlan_id} classid 1:{sub_clase}"
+        
+        f"tc class replace dev int0 parent 1:1 classid 1:{slice_num} htb rate {req_cir_total}mbit",
+        f"tc filter replace dev int0 protocol 802.1Q parent 1:0 prio {slice_num} flower vlan_id {vlan_id} classid 1:{slice_num}"
     ]
 
-    cola_hija_idx = 0
+    cola_hija_idx = 1
     for cls_name, cls_data in qos_classes.items():
         req_delay = float(cls_data.get("delay", 100))
         cir = cls_data.get("cir", 50)
@@ -166,15 +173,16 @@ def configurar_routers_borde(vlan_id, req_cir_total, qos_classes, ruta_ida_sids,
         else:
             dscp_int, dscp_ext = "0x00", "0x01"
 
-        cola_hija = f"1:{sub_clase}{cola_hija_idx}"
+        # Colas hijas únicas (Ej: 1:30011, 1:30012)
+        cola_hija = f"1:{slice_num}{cola_hija_idx}"
         
         cmds_rg.extend([
-            f"tc class replace dev int0 parent 1:{sub_clase} classid {cola_hija} htb rate {cir}mbit",
-            f"tc filter replace dev int0 protocol 802.1Q parent 1:{sub_clase} prio 1 u32 match ip6 priority {dscp_int} 0xff classid {cola_hija}"
+            f"tc class replace dev int0 parent 1:{slice_num} classid {cola_hija} htb rate {cir}mbit",
+            f"tc filter replace dev int0 protocol 802.1Q parent 1:{slice_num} prio {cola_hija_idx} u32 match ip6 priority {dscp_int} 0xff classid {cola_hija}"
         ])
         cmds_ru.extend([
-            f"tc class replace dev int0 parent 1:{sub_clase} classid {cola_hija} htb rate {cir}mbit",
-            f"tc filter replace dev int0 protocol 802.1Q parent 1:{sub_clase} prio 1 u32 match ip6 priority {dscp_int} 0xff classid {cola_hija}"
+            f"tc class replace dev int0 parent 1:{slice_num} classid {cola_hija} htb rate {cir}mbit",
+            f"tc filter replace dev int0 protocol 802.1Q parent 1:{slice_num} prio {cola_hija_idx} u32 match ip6 priority {dscp_int} 0xff classid {cola_hija}"
         ])
 
         if dscp_ext == "0x04":
@@ -241,11 +249,11 @@ def inyectar_comandos_router(slice_id, req_cir_total, ruta_asignada, req_delay_m
 def eliminar_comandos_router(slice_id, ruta_asignada):
     """
     Des-aprovisiona la Slice de los routers físicos.
-    Borra las interfaces VLAN, rutas SRv6 y las colas HTB asociadas.
+    Borra las interfaces VLAN, rutas SRv6, FILTROS y colas HTB asociadas.
     """
     print(f"\n[SRC] === INICIANDO TERMINACIÓN DE SLICE {slice_id} ===")
     
-    sub_clase = str(slice_id)[-1]
+    slice_num = int(slice_id)
     
     # 1. Limpiar Extremos (Cliente gNB y Servidor UPF)
     ejecutar('rgnb', f"ip link del eth1.{slice_id} 2>/dev/null")
@@ -260,8 +268,14 @@ def eliminar_comandos_router(slice_id, ruta_asignada):
     ejecutar('rg', f"ip -6 route del fd00:{slice_id}:d::/64 2>/dev/null")
     ejecutar('ru', f"ip -6 route del fd00:{slice_id}:a::/64 2>/dev/null")
     
-    ejecutar('rg', f"tc class del dev int0 classid 1:{sub_clase} 2>/dev/null")
-    ejecutar('ru', f"tc class del dev int0 classid 1:{sub_clase} 2>/dev/null")
+    # 3. Limpiar QoS: ¡Primero se borran los filtros, luego las colas!
+    # Borramos exactamente el filtro asociado a esta VLAN gracias a su prioridad única
+    ejecutar('rg', f"tc filter del dev int0 parent 1:0 prio {slice_num} 2>/dev/null")
+    ejecutar('ru', f"tc filter del dev int0 parent 1:0 prio {slice_num} 2>/dev/null")
+    
+    # Al borrar la clase padre limpia, Linux destruye en cascada las clases hijas automáticamente
+    ejecutar('rg', f"tc class del dev int0 classid 1:{slice_num} 2>/dev/null")
+    ejecutar('ru', f"tc class del dev int0 classid 1:{slice_num} 2>/dev/null")
     
     print(f"[SRC] ✅ Slice {slice_id} eliminada físicamente del plano de datos.")
     return True
