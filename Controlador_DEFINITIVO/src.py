@@ -247,33 +247,28 @@ def inyectar_comandos_router(slice_id, req_cir_total, ruta_asignada, req_delay_m
 
 # NUEVO BLOQUE: Función para limpiar el router
 def eliminar_comandos_router(slice_id, ruta_asignada):
-    """
-    Des-aprovisiona la Slice de los routers físicos.
-    Borra las interfaces VLAN, rutas SRv6, FILTROS y colas HTB asociadas.
-    """
     print(f"\n[SRC] === INICIANDO TERMINACIÓN DE SLICE {slice_id} ===")
     
-    slice_num = int(slice_id)
+    # Extraemos los dos últimos dígitos de la VLAN para el borrado
+    suffix = str(slice_id)[-2:]
+    slice_num = f"1{suffix}"
     
-    # 1. Limpiar Extremos (Cliente gNB y Servidor UPF)
+    # 1. Limpiar Extremos... (esto se queda igual)
     ejecutar('rgnb', f"ip link del eth1.{slice_id} 2>/dev/null")
     ejecutar('rgnb', f"ip link del eth2.{slice_id} 2>/dev/null")
     ejecutar('rupf', f"ip link del eth1.{slice_id} 2>/dev/null")
     ejecutar('rupf', f"ip link del eth2.{slice_id} 2>/dev/null")
     
-    # 2. Limpiar Routers de Borde (RG y RU)
+    # 2. Limpiar Routers de Borde... (esto se queda igual)
     ejecutar('rg', f"ip link del int0.{slice_id} 2>/dev/null")
     ejecutar('ru', f"ip link del int0.{slice_id} 2>/dev/null")
-    
     ejecutar('rg', f"ip -6 route del fd00:{slice_id}:d::/64 2>/dev/null")
     ejecutar('ru', f"ip -6 route del fd00:{slice_id}:a::/64 2>/dev/null")
     
-    # 3. Limpiar QoS: ¡Primero se borran los filtros, luego las colas!
-    # Borramos exactamente el filtro asociado a esta VLAN gracias a su prioridad única
+    # 3. Limpiar QoS usando el nuevo slice_num de 3 dígitos
     ejecutar('rg', f"tc filter del dev int0 parent 1:0 prio {slice_num} 2>/dev/null")
     ejecutar('ru', f"tc filter del dev int0 parent 1:0 prio {slice_num} 2>/dev/null")
     
-    # Al borrar la clase padre limpia, Linux destruye en cascada las clases hijas automáticamente
     ejecutar('rg', f"tc class del dev int0 classid 1:{slice_num} 2>/dev/null")
     ejecutar('ru', f"tc class del dev int0 classid 1:{slice_num} 2>/dev/null")
     
