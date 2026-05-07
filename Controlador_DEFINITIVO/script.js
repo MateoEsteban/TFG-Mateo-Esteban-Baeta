@@ -30,7 +30,7 @@ function removeClass(btnElement) {
     }
 }
 
-// Actualiza los títulos "Clase 1, Clase 2" para que siempre tengan sentido aunque borres las del medio
+// Actualiza los títulos de las clases
 function renombrarClasesVisualmente() {
     const clases = document.querySelectorAll('.qos-class');
     clases.forEach((div, index) => {
@@ -38,18 +38,13 @@ function renombrarClasesVisualmente() {
     });
 }
 
-// Llamar a la función al arrancar para inicializar el título de la primera caja
 renombrarClasesVisualmente();
 
-// Función para procesar y enviar la petición al backend
+// Procesar y enviar la petición al backend
 async function submitSlice(event) {
-    // Bloqueamos el recargo automático de la página web al pulsar el botón
-    if (event) {
-        event.preventDefault(); 
-    }
+    if (event) { event.preventDefault(); }
 
     const delayInputs = document.querySelectorAll('input[name="delay"]');
-    // Mapear los valores de delay a su clase (TNA, TNB, TNC, TND)
     const tiposSeleccionados = Array.from(delayInputs).map(input => {
         const d = parseFloat(input.value);
         if (d <= 5) return "URLLC";
@@ -60,9 +55,9 @@ async function submitSlice(event) {
 
     const tiposUnicos = new Set(tiposSeleccionados);
     
-    // Validación de integridad del modelo HCTNS
+    // Validación de integridad
     if (tiposSeleccionados.length !== tiposUnicos.size) {
-        alert("Error de Diseño HCTNS: No puedes asignar dos flujos con la misma categoría de latencia dentro de la misma Slice. Esto rompería el aislamiento en el router frontera.");
+        alert("Error de Diseño HCTNS: No puedes asignar dos flujos con la misma categoría de latencia dentro de la misma Slice. Esto rompería el aislamiento.");
         return;
     }
 
@@ -71,7 +66,6 @@ async function submitSlice(event) {
     resultBox.className = '';
     resultBox.innerHTML = "⏳ Evaluando Control de Admisión...";
 
-    // Construir el JSON exacto que espera FastAPI (Dejamos que el Backend asigne la VLAN)
     const payload = {
         "network_slice": {
             "id": "auto", 
@@ -81,7 +75,6 @@ async function submitSlice(event) {
 
     const clasesDOM = document.querySelectorAll('.qos-class');
     let counter = 1;
-
     clasesDOM.forEach((div) => {
         const burst = div.querySelector('input[name="burst"]').value;
         const cir = div.querySelector('input[name="cir"]').value;
@@ -98,7 +91,6 @@ async function submitSlice(event) {
     });
 
     try {
-        // Enviar la petición POST al backend
         const response = await fetch('/provision_slice', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -107,10 +99,28 @@ async function submitSlice(event) {
 
         const data = await response.json();
 
-        // Mostrar si se acepta o rechaza, leyendo la VLAN directamente del controlador SDN
         if (response.ok) {
             resultBox.className = 'success';
             resultBox.innerHTML = `✅ ¡Aceptado! Slice (VLAN ${data.slice_id}) creada.<br>Ruta asignada: ${data.ruta_elegida.join(' ➔ ')}`;
+            
+            // Añadir al panel de Slices Activas
+            const slicesPanel = document.getElementById('slicesPanel');
+            const slicesList = document.getElementById('slicesList');
+            slicesPanel.style.display = 'block'; 
+
+            const sliceCard = document.createElement('div');
+            sliceCard.className = 'slice-card';
+            sliceCard.innerHTML = `
+                <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+                    <div>
+                        <h4>🌐 Slice VLAN ${data.slice_id}</h4>
+                        <p><strong>Ruta asignada:</strong> ${data.ruta_elegida.join(' ➔ ')}</p>
+                        <p><strong>Flujos QoS:</strong> ${tiposSeleccionados.join(', ')}</p>
+                    </div>
+                    <button type="button" class="btn-remove-slice" onclick="deleteSlice('${data.slice_id}', this)">🗑️ Eliminar</button>
+                </div>
+            `;
+            slicesList.prepend(sliceCard);
         } else {
             resultBox.className = 'error';
             resultBox.innerHTML = `❌ Rechazado: ${data.detail || 'Falta de recursos en la red.'}`;
@@ -118,5 +128,31 @@ async function submitSlice(event) {
     } catch (err) {
         resultBox.className = 'error';
         resultBox.innerHTML = `❌ Error de comunicación con el Controlador SDN.`;
+    }
+}
+
+// NUEVO: Función para eliminar una Slice
+async function deleteSlice(sliceId, btnElement) {
+    if (!confirm(`¿Estás seguro de que deseas eliminar la Slice ${sliceId} y liberar sus recursos?`)) {
+        return;
+    }
+
+    try {
+        const response = await fetch(`/delete_slice/${sliceId}`, { method: 'DELETE' });
+
+        if (response.ok) {
+            btnElement.closest('.slice-card').remove();
+            alert(`✅ Slice ${sliceId} eliminada. Ancho de banda devuelto a la red.`);
+
+            const slicesList = document.getElementById('slicesList');
+            if (slicesList.children.length === 0) {
+                document.getElementById('slicesPanel').style.display = 'none';
+            }
+        } else {
+            const data = await response.json();
+            alert(`❌ Error al eliminar: ${data.detail}`);
+        }
+    } catch (err) {
+        alert("❌ Error de comunicación con el Controlador SDN.");
     }
 }
