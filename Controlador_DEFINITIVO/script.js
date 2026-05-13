@@ -103,24 +103,19 @@ async function submitSlice(event) {
             resultBox.className = 'success';
             resultBox.innerHTML = `✅ ¡Aceptado! Slice (VLAN ${data.slice_id}) creada.<br>Ruta asignada: ${data.ruta_elegida.join(' ➔ ')}`;
             
-            // Añadir al panel de Slices Activas
-            const slicesPanel = document.getElementById('slicesPanel');
-            const slicesList = document.getElementById('slicesList');
-            slicesPanel.style.display = 'block'; 
-
-            const sliceCard = document.createElement('div');
-            sliceCard.className = 'slice-card';
-            sliceCard.innerHTML = `
-                <div style="display: flex; justify-content: space-between; align-items: flex-start;">
-                    <div>
-                        <h4>🌐 Slice VLAN ${data.slice_id}</h4>
-                        <p><strong>Ruta asignada:</strong> ${data.ruta_elegida.join(' ➔ ')}</p>
-                        <p><strong>Flujos QoS:</strong> ${tiposSeleccionados.join(', ')}</p>
+            const activeContainer = document.getElementById('activeSlicesContainer');
+            if (activeContainer) {
+                const sliceDiv = document.createElement('div');
+                sliceDiv.className = 'active-slice qos-class';
+                sliceDiv.innerHTML = `
+                    <div class="qos-header">
+                        <h3 class="class-title">VLAN ${data.slice_id}</h3>
+                        <button type="button" class="btn-remove" onclick='deleteSlice(this, "${data.slice_id}")'>🗑️ Eliminar</button>
                     </div>
-                    <button type="button" class="btn-remove-slice" onclick="deleteSlice('${data.slice_id}', this)">🗑️ Eliminar</button>
-                </div>
-            `;
-            slicesList.prepend(sliceCard);
+                    <p><strong>Ruta SRv6:</strong> ${data.ruta_elegida.join(' ➔ ')}</p>
+                `;
+                activeContainer.appendChild(sliceDiv);
+            }
         } else {
             resultBox.className = 'error';
             resultBox.innerHTML = `❌ Rechazado: ${data.detail || 'Falta de recursos en la red.'}`;
@@ -131,28 +126,27 @@ async function submitSlice(event) {
     }
 }
 
-// NUEVO: Función para eliminar una Slice
-async function deleteSlice(sliceId, btnElement) {
-    if (!confirm(`¿Estás seguro de que deseas eliminar la Slice ${sliceId} y liberar sus recursos?`)) {
-        return;
-    }
+async function deleteSlice(btnElement, sliceId) {
+    const btnOriginalText = btnElement.innerText;
+    btnElement.innerText = "⏳ Liberando...";
+    btnElement.disabled = true;
 
     try {
-        const response = await fetch(`/delete_slice/${sliceId}`, { method: 'DELETE' });
+        const response = await fetch(`/delete_slice/${sliceId}`, {
+            method: 'DELETE'
+        });
 
         if (response.ok) {
-            btnElement.closest('.slice-card').remove();
-            alert(`✅ Slice ${sliceId} eliminada. Ancho de banda devuelto a la red.`);
-
-            const slicesList = document.getElementById('slicesList');
-            if (slicesList.children.length === 0) {
-                document.getElementById('slicesPanel').style.display = 'none';
-            }
+            alert(`✅ Recursos físicos (+20% overhead) de la VLAN ${sliceId} liberados con éxito.`);
+            btnElement.closest('.active-slice').remove();
         } else {
-            const data = await response.json();
-            alert(`❌ Error al eliminar: ${data.detail}`);
+            alert("❌ Error al liberar recursos.");
+            btnElement.innerText = btnOriginalText;
+            btnElement.disabled = false;
         }
     } catch (err) {
-        alert("❌ Error de comunicación con el Controlador SDN.");
+        alert("❌ Error de comunicación.");
+        btnElement.innerText = btnOriginalText;
+        btnElement.disabled = false;
     }
 }

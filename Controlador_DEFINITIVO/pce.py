@@ -70,12 +70,11 @@ def actualizar_networkinfo(ruta_asignada, req_cir, archivo="networkinfo.json"):
         
     print("[PCE] ✅ Archivo JSON sobrescrito correctamente.")
 
-def liberar_networkinfo(ruta_asignada, req_cir, archivo="networkinfo.json"):
+def liberar_networkinfo(ruta_asignada, req_cir_fisico, archivo="networkinfo.json"):
     """
-    Actualiza el estado de la red sumando el ancho de banda liberado 
-    a los enlaces de la ruta que se acaba de eliminar.
+    Restaura el estado de la red sumando el CIR físico liberado a los enlaces de la ruta.
     """
-    print(f"\n[PCE] Liberando recursos en '{archivo}'...")
+    print(f"\n[PCE] Devolviendo {req_cir_fisico} Mbps a los enlaces físicos en '{archivo}'...")
     with open(archivo, "r") as f:
         data = json.load(f)
 
@@ -84,15 +83,13 @@ def liberar_networkinfo(ruta_asignada, req_cir, archivo="networkinfo.json"):
         destino = ruta_asignada[i+1]
         for enlace in data["graph"]["edges"]:
             if enlace["source"] == origen and enlace["target"] == destino:
-                enlace["bandwidth"] += req_cir
-                print(f" -> Enlace liberado ({origen} -> {destino}): Nuevo ancho de banda libre = {enlace['bandwidth']} Mbps")
+                enlace["bandwidth"] += req_cir_fisico
                 break
 
     with open(archivo, "w") as f:
         json.dump(data, f, indent=4)
-        
-    print("[PCE] ✅ Recursos devueltos a la red correctamente.")
-
+    print("[PCE] ✅ Archivo JSON restaurado con éxito.")
+    
 if __name__ == "__main__":
     print("[PCE] Iniciando prueba local del PCE (Sin API)...")
     G = create_graph()
