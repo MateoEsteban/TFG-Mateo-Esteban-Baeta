@@ -37,15 +37,13 @@
     <!-- Caja para mostrar el resultado -->
     <div id="result"></div>
 
-    <!-- NUEVO CONTENEDOR PARA LAS TARJETAS (Oculto por defecto) -->
-    <div id="slicesPanel" style="display: none; margin-top: 30px;">
-        <hr style="border: 1px dashed #ccc;">
-        <div style="text-align: center;">
-            <h2 style="color: #2c3e50;">Slices Activas</h2>
-        </div>
-        
-        <!-- Aquí dentro se inyectarán tus nuevas tarjetas "slice-card" -->
-        <div id="slicesList"></div>
+    <!-- Sección de Slices Activas -->
+    <div class="slices-panel" id="slicesPanel" style="display: block;">
+        <h2>Slices Activas</h2>
+    
+        <!-- Aquí es donde Javascript inyectará las cajas mágicamente -->
+        <div id="slicesActivasContainer"></div>
+    
     </div>
 </div>
 

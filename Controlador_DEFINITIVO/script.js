@@ -6,7 +6,7 @@ function addClass() {
     div.innerHTML = `
         <div class="qos-header">
             <h3 class="class-title">Clase de QoS</h3>
-            <button type="button" class="btn-remove" onclick="removeClass(this)">🗑️ Eliminar</button>
+            <button type="button" class="btn-remove" onclick="removeClass(this)">🗑 Eliminar</button>
         </div>
         <label>Burst (Bytes):</label>
         <input type="number" name="burst" value="1500" required>
@@ -24,13 +24,13 @@ function removeClass(btnElement) {
     const container = document.getElementById('classesContainer');
     if (container.children.length > 1) {
         btnElement.closest('.qos-class').remove();
-        renombrarClasesVisualmente(); 
+        renombrarClasesVisualmente();
     } else {
         alert("No puedes eliminar esta clase. La Slice debe tener al menos una.");
     }
 }
 
-// Actualiza los títulos de las clases
+// Actualiza los títulos "Clase 1, Clase 2" para que siempre tengan sentido aunque borres las del medio
 function renombrarClasesVisualmente() {
     const clases = document.querySelectorAll('.qos-class');
     clases.forEach((div, index) => {
@@ -38,13 +38,20 @@ function renombrarClasesVisualmente() {
     });
 }
 
+// Llamar a la función al arrancar para inicializar el título de la primera caja
 renombrarClasesVisualmente();
 
-// Procesar y enviar la petición al backend
+// Función para procesar y enviar la petición al backend
+// Función para procesar y enviar la petición al backend
 async function submitSlice(event) {
-    if (event) { event.preventDefault(); }
+    // Bloqueamos el recargo automático de la página web al pulsar el botón
+    if (event) {
+        event.preventDefault();
+    }
 
     const delayInputs = document.querySelectorAll('input[name="delay"]');
+    
+    // Mapear los valores de delay a su clase (TNA, TNB, TNC, TND)
     const tiposSeleccionados = Array.from(delayInputs).map(input => {
         const d = parseFloat(input.value);
         if (d <= 5) return "URLLC";
@@ -54,10 +61,10 @@ async function submitSlice(event) {
     });
 
     const tiposUnicos = new Set(tiposSeleccionados);
-    
-    // Validación de integridad
+
+    // Validación de integridad del modelo HCTNS
     if (tiposSeleccionados.length !== tiposUnicos.size) {
-        alert("Error de Diseño HCTNS: No puedes asignar dos flujos con la misma categoría de latencia dentro de la misma Slice. Esto rompería el aislamiento.");
+        alert("Error de Diseño HCTNS: No puedes asignar dos flujos con la misma categoría de latencia dentro de la misma Slice. Esto rompería el aislamiento en el router frontera.");
         return;
     }
 
@@ -66,15 +73,17 @@ async function submitSlice(event) {
     resultBox.className = '';
     resultBox.innerHTML = "⏳ Evaluando Control de Admisión...";
 
+    // Construir el JSON exacto que espera FastAPI (Dejamos que el Backend asigne la VLAN)
     const payload = {
         "network_slice": {
-            "id": "auto", 
+            "id": "auto",
             "5G_qos_classes": {}
         }
     };
 
     const clasesDOM = document.querySelectorAll('.qos-class');
     let counter = 1;
+    
     clasesDOM.forEach((div) => {
         const burst = div.querySelector('input[name="burst"]').value;
         const cir = div.querySelector('input[name="cir"]').value;
@@ -91,36 +100,40 @@ async function submitSlice(event) {
     });
 
     try {
+        // Enviar la petición POST al backend
         const response = await fetch('/provision_slice', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {
+                'Content-Type': 'application/json'
+            },
             body: JSON.stringify(payload)
         });
 
         const data = await response.json();
 
+        // Mostrar si se acepta o rechaza, leyendo la VLAN directamente del controlador SDN
         if (response.ok) {
             resultBox.className = 'success';
             resultBox.innerHTML = `✅ ¡Aceptado! Slice (VLAN ${data.slice_id}) creada.<br>Ruta asignada: ${data.ruta_elegida.join(' ➔ ')}`;
-            
-            // Añadir al panel de Slices Activas (Tu nuevo código)
-            const slicesPanel = document.getElementById('slicesPanel');
-            const slicesList = document.getElementById('slicesList');
-            slicesPanel.style.display = 'block'; 
 
-            const sliceCard = document.createElement('div');
-            sliceCard.className = 'slice-card';
-            sliceCard.innerHTML = `
-                <div style="display: flex; justify-content: space-between; align-items: flex-start;">
-                    <div>
-                        <h4 style="margin-top: 0; color: #2c3e50;">🌐 Slice VLAN ${data.slice_id}</h4>
-                        <p style="margin: 5px 0;"><strong>Ruta asignada:</strong> ${data.ruta_elegida.join(' ➔ ')}</p>
-                        <p style="margin: 5px 0;"><strong>Flujos QoS:</strong> ${tiposSeleccionados.join(', ')}</p>
-                    </div>
-                    <button type="button" class="btn-remove-slice" onclick="deleteSlice('${data.slice_id}', this)">🗑️ Eliminar</button>
-                </div>
-            `;
-            slicesList.prepend(sliceCard);
+            // Localizamos el contenedor vacío en el HTML
+            const activeSlicesContainer = document.getElementById('slicesActivasContainer');
+            
+            if (activeSlicesContainer) {
+                // Creamos un nuevo Div para la Slice
+                const nuevaSlice = document.createElement('div');
+                nuevaSlice.className = 'slice-card'; 
+                
+                // Dibujamos el HTML interno inyectando la variable dinámica ${data.slice_id}
+                nuevaSlice.innerHTML = `
+                    <h4>🌐 Slice VLAN ${data.slice_id}</h4>
+                    <p><strong>Ruta asignada:</strong> ${data.ruta_elegida.join(' ➔ ')}</p>
+                    <button class="btn-remove-slice" onclick="eliminarSliceWeb('${data.slice_id}', this)">🗑️ Eliminar</button>
+                `;
+                
+                // Lo añadimos a la pantalla
+                activeSlicesContainer.appendChild(nuevaSlice);
+            }
 
         } else {
             resultBox.className = 'error';
@@ -132,34 +145,26 @@ async function submitSlice(event) {
     }
 }
 
-async function deleteSlice(sliceId, btnElement) {
-    const btnOriginalText = btnElement.innerText;
-    btnElement.innerText = "⏳ Liberando...";
-    btnElement.disabled = true;
+// Función para eliminar una Slice Activa y liberar recursos en los routers físicos
+async function eliminarSliceWeb(slice_id, btnElement) {
+    if (!confirm(`¿Estás seguro de que quieres eliminar la Slice VLAN ${slice_id} y destruir sus colas?`)) {
+        return;
+    }
 
     try {
-        const response = await fetch(`/delete_slice/${sliceId}`, {
+        const response = await fetch(`/delete_slice/${slice_id}`, {
             method: 'DELETE'
         });
 
         if (response.ok) {
-            alert(`✅ Recursos físicos (+20% overhead) de la VLAN ${sliceId} liberados con éxito.`);
-            // Borra la tarjeta nueva
-            btnElement.closest('.slice-card').remove();
-            
-            // Si ya no quedan tarjetas, ocultamos el panel entero
-            const slicesList = document.getElementById('slicesList');
-            if (slicesList.children.length === 0) {
-                document.getElementById('slicesPanel').style.display = 'none';
-            }
+            // Borra la caja visual de la web (adaptado a tu clase css 'slice-card' o 'qos-class')
+            btnElement.closest('div').remove(); 
+            alert(`✅ Slice ${slice_id} eliminada. Colas destruidas y recursos físicos liberados.`);
         } else {
-            alert("❌ Error al liberar recursos.");
-            btnElement.innerText = btnOriginalText;
-            btnElement.disabled = false;
+            const errorData = await response.json();
+            alert(`❌ Error al eliminar: ${errorData.detail}`);
         }
     } catch (err) {
-        alert("❌ Error de comunicación.");
-        btnElement.innerText = btnOriginalText;
-        btnElement.disabled = false;
+        alert("❌ Error de comunicación con el Controlador SDN.");
     }
 }

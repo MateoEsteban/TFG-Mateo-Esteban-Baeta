@@ -53,15 +53,24 @@ async def provision_slice(peticion: dict):
     # El PCE busca hueco con los megas físicos (ej: 40 * 1.2 = 48 Mbps)
     ruta_asignada = pce.control_de_admision(G, "rg", "ru", req_cir_fisico, req_delay_min)
 
+     # 3. Resoluciones tras el control de admisión
     if ruta_asignada:
+        # Sumamos 1 al contador global de forma segura
         vlan_global_counter += 1
         vlan_asignada = str(vlan_global_counter)
         print(f"[API] ✅ Slice admitida. Se ha asignado la VLAN {vlan_asignada}")
 
-        # El PCE descuenta los megas físicos (48 Mbps)
-        pce.actualizar_networkinfo(ruta_asignada, req_cir_fisico)
+        # ---> NUEVO: GUARDAMOS LA SLICE EN LA MEMORIA DEL CONTROLADOR <---
+        active_slices[vlan_asignada] = {
+            "ruta": ruta_asignada,
+            "cir": req_cir_total
+        }
+        # -----------------------------------------------------------------
 
-        # El SRC configura la cola HTB limitando estrictamente a los megas útiles (40 Mbps)
+        # Le indicamos al PCE que actualice el fichero networkinfo.json restando los megas
+        pce.actualizar_networkinfo(ruta_asignada, req_cir_total)
+
+        # Le pasamos el relevo al SRC para la inyección por SSH
         exito = src.inyectar_comandos_router(vlan_asignada, req_cir_total, ruta_asignada, req_delay_min, qos_classes)
 
         if not exito:
@@ -82,24 +91,34 @@ async def provision_slice(peticion: dict):
 async def delete_slice(slice_id: str):
     global active_slices
     
+    # 1. Comprobamos que la Slice está en la memoria del controlador
     if slice_id not in active_slices:
-        raise HTTPException(status_code=404, detail="La Slice no existe.")
-    
+        raise HTTPException(status_code=404, detail="La Slice no existe en la memoria.")
+        
     slice_data = active_slices[slice_id]
     ruta = slice_data["ruta"]
     cir_util = slice_data["cir"]
     
-    # Recuperamos la fórmula del 20% para devolver exactamente lo reservado
+    # 2. Recuperamos la fórmula del 20% para devolver exactamente lo reservado al núcleo
     req_cir_fisico = float(cir_util) * 1.2
     
     try:
-        # El PCE suma los megas físicos de vuelta
+        # 3. El PCE suma los megas físicos de vuelta
         pce.liberar_networkinfo(ruta, req_cir_fisico)
-        # El SRC borra la cola del router
+        
+        # 4. El SRC borra la cola del router en Linux
         src.eliminar_comandos_router(slice_id, ruta)
         
-        del active_slices[slice_id]
-        print(f"[API] ✅ Slice {slice_id} eliminada correctamente.")
-        return {"mensaje": "Recursos liberados correctamente"}
+        # 5. Borramos de la memoria RAM de Python de forma segura
+        if slice_id in active_slices:
+            del active_slices[slice_id]
+            
+        print(f"[API] ✅ Slice {slice_id} eliminada completamente de la red y la memoria.")
+        return {"mensaje": f"Recursos de la VLAN {slice_id} liberados correctamente"}
+        
     except Exception as e:
-        raise HTTPException(status_code=500, detail="Error interno al liberar la Slice.")
+        # ---> NUEVO: Chivato para ver exactamente por qué Python se queja <---
+        print(f"\n[API] ❌ ERROR INTERNO DE PYTHON AL ELIMINAR: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Error interno del controlador: {str(e)}")

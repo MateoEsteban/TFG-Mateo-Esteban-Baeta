@@ -71,31 +71,25 @@ def actualizar_networkinfo(ruta_asignada, req_cir, archivo="networkinfo.json"):
     print("[PCE] ✅ Archivo JSON sobrescrito correctamente.")
 
 def liberar_networkinfo(ruta_asignada, req_cir_fisico, archivo="networkinfo.json"):
-    """
-    Restaura el estado de la red sumando el CIR físico liberado a los enlaces de la ruta.
-    """
+    """ Restaura el estado de la red sumando el CIR físico liberado a los enlaces de la ruta. """
     print(f"\n[PCE] Devolviendo {req_cir_fisico} Mbps a los enlaces físicos en '{archivo}'...")
+    
     with open(archivo, "r") as f:
         data = json.load(f)
-
+        
+    # Recorrer la ruta y devolver los megas a cada salto
     for i in range(len(ruta_asignada) - 1):
         origen = ruta_asignada[i]
         destino = ruta_asignada[i+1]
+        
         for enlace in data["graph"]["edges"]:
             if enlace["source"] == origen and enlace["target"] == destino:
                 enlace["bandwidth"] += req_cir_fisico
+                print(f" -> Enlace restaurado ({origen} -> {destino}): Nuevo ancho de banda libre = {enlace['bandwidth']} Mbps")
                 break
-
+                
+    # Sobrescribir el archivo JSON con los recursos recuperados
     with open(archivo, "w") as f:
         json.dump(data, f, indent=4)
-    print("[PCE] ✅ Archivo JSON restaurado con éxito.")
-    
-if __name__ == "__main__":
-    print("[PCE] Iniciando prueba local del PCE (Sin API)...")
-    G = create_graph()
-    req_cir = 100
-    req_delay = 5
-    ruta = control_de_admision(G, "rg", "ru", req_cir, req_delay)
-    if ruta:
-        actualizar_networkinfo(ruta, req_cir)
-    print(f"[PCE] Prueba finalizada. Ruta asignada: {ruta}")
+        
+    print("[PCE] ✅ Archivo JSON sobrescrito y recursos liberados correctamente.")

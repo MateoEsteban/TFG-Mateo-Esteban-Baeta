@@ -50,25 +50,25 @@
             {
                 "source": "rg",
                 "target": "r4",
-                "bandwidth": 284.0,
+                "bandwidth": 538.0,
                 "delay": 1
             },
             {
                 "source": "r4",
                 "target": "r6",
-                "bandwidth": 284.0,
+                "bandwidth": 538.0,
                 "delay": 1
             },
             {
                 "source": "r6",
                 "target": "r7",
-                "bandwidth": 284.0,
+                "bandwidth": 538.0,
                 "delay": 1
             },
             {
                 "source": "r7",
                 "target": "ru",
-                "bandwidth": 284.0,
+                "bandwidth": 538.0,
                 "delay": 1
             },
             {
