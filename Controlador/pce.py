@@ -3,6 +3,10 @@ import json
 import networkx as nx
 
 def create_graph():
+    """
+    Crea un grafo dirigido a partir de la configuración de red en networkinfo.json.
+    Los nodos representan routers y los enlaces incluyen información de ancho de banda y latencia.
+    """
     with open("networkinfo.json", "r") as f:
         data = json.load(f)
     
@@ -17,8 +21,10 @@ def create_graph():
 
 def control_de_admision(G, origen, destino, req_cir, req_delay):
     """
-    Comprueba si existe algún camino en el grafo que soporte los requisitos 
-    de ancho de banda y latencia máxima usando NetworkX.
+    Verifica si existe una ruta disponible que cumpla los requisitos
+    de ancho de banda y latencia máxima utilizando Networkx.
+    
+    Devuelve la ruta (lista de nodos) si cumple los requisitos, None si no hay ruta disponible.
     """
     print(f"\n[PCE] Ejecutando Control de Admisión -> Requisitos: {req_cir} Mbps | Latencia Máx: {req_delay} ms")
     
@@ -28,17 +34,20 @@ def control_de_admision(G, origen, destino, req_cir, req_delay):
         print("❌ [PCE] Error: No existe conectividad física entre el origen y el destino.")
         return None
 
+    # Ordenar rutas por latencia total (de menor a mayor)
     caminos_posibles.sort(key=lambda c: sum(G[c[i]][c[i+1]]['delay'] for i in range(len(c)-1)))
     
     for camino in caminos_posibles:
         delay_total = 0
         bw_minimo = float('inf')
         
+        # Calcular métricas del camino
         for i in range(len(camino)-1):
             u, v = camino[i], camino[i+1]
             delay_total += G[u][v]['delay']
             bw_minimo = min(bw_minimo, G[u][v]['bandwidth'])
             
+        # Validar si el camino satisface los requisitos SLA
         if delay_total <= req_delay and bw_minimo >= req_cir:
             print(f"✅ [PCE] ¡ACEPTADO! Ruta válida encontrada: {camino}")
             print(f" -> Rendimiento proyectado de la ruta: Latencia {delay_total}ms | BW Mínimo {bw_minimo}Mbps")
@@ -49,8 +58,10 @@ def control_de_admision(G, origen, destino, req_cir, req_delay):
 
 def actualizar_networkinfo(ruta_asignada, req_cir, archivo="networkinfo.json"):
     """
-    Actualizar el estado de la red. Resta el ancho de banda concedido 
-    a los enlaces de la ruta elegida y sobrescribe el fichero JSON.
+    Actualizar el estado de la topología de red. Decrementa el ancho de banda
+    disponible en los enlaces correspondientes a la ruta asignada.
+    
+    Persiste los cambios en el archivo JSON.
     """
     print(f"\n[PCE] Actualizando el estado de la red en '{archivo}'...")
     with open(archivo, "r") as f:

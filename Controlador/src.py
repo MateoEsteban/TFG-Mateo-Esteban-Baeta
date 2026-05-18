@@ -8,7 +8,7 @@ def ejecutar(nodo, comando):
     subprocess.run(cmd_lxc, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 def check_containers_running(required_nodes):
-    """Verifica si todos los contenedores requeridos están corriendo"""
+    """Verifica si los contenedores requeridos están activos en el sistema"""
     try:
         result = subprocess.run(['sudo', 'lxc-ls', '--running'], capture_output=True, text=True)
         running_containers = result.stdout.split() if result.stdout else []
@@ -18,7 +18,7 @@ def check_containers_running(required_nodes):
         return False
 
 def load_loopbacks(path='networkinfo.json'):
-    """Carga los SIDs (loopbacks) de la red (sin máscara)"""
+    """Carga los direcciones loopback (SID) de los nodos desde la configuración de red"""
     try:
         with open(path, 'r') as f:
             data = json.load(f)
@@ -27,7 +27,7 @@ def load_loopbacks(path='networkinfo.json'):
         return {}
 
 def inicializar_qos_base_borde(nodo):
-    """ Crea el tronco base (HTB y DRR) en los routers de borde (rg y ru). """
+    """Configura la infraestructura base de QoS (HTB y DRR) en routers de borde"""
     cmds_base = [
         "ovs-vsctl add-br br0 2>/dev/null",
         "ovs-vsctl add-port br0 eth1 2>/dev/null",
@@ -55,7 +55,7 @@ def inicializar_qos_base_borde(nodo):
         ejecutar(nodo, cmd)
 
 def configurar_nodo_p(nodo):
-    """ Configuración de Granularidad Gruesa para los nodos de tránsito. """
+    """Configura QoS de granularidad gruesa en nodos de tránsito"""
     interfaces = ['eth1', 'eth2', 'eth3']
     for dev in interfaces:
         comandos = [
@@ -75,7 +75,7 @@ def configurar_nodo_p(nodo):
             ejecutar(nodo, cmd)
 
 def configurar_extremos_acceso(nodo_cliente, nodo_servidor, vlan_id, qos_classes):
-    """ Crea dinámicamente IPs y marcado DSCP para N flujos """
+    """Configura VLANs y etiquetado DSCP para múltiples flujos en nodos de acceso"""
     cmds_gnb = [
         f"ip link add link eth1 name eth1.{vlan_id} type vlan id {vlan_id} 2>/dev/null",
         f"ip link add link eth2 name eth2.{vlan_id} type vlan id {vlan_id} 2>/dev/null",

@@ -1,4 +1,4 @@
-// Función para añadir una nueva caja de Clase QoS
+// Añade una nueva clase de QoS al formulario
 function addClass() {
     const container = document.getElementById('classesContainer');
     const div = document.createElement('div');
@@ -19,7 +19,7 @@ function addClass() {
     renombrarClasesVisualmente();
 }
 
-// Función para eliminar una caja de Clase QoS
+// Elimina una clase de QoS del formulario
 function removeClass(btnElement) {
     const container = document.getElementById('classesContainer');
     if (container.children.length > 1) {
@@ -30,7 +30,7 @@ function removeClass(btnElement) {
     }
 }
 
-// Actualiza los títulos "Clase 1, Clase 2" para que siempre tengan sentido aunque borres las del medio
+// Actualiza los números secuenciales de las clases al añadir o eliminar
 function renombrarClasesVisualmente() {
     const clases = document.querySelectorAll('.qos-class');
     clases.forEach((div, index) => {
@@ -38,20 +38,19 @@ function renombrarClasesVisualmente() {
     });
 }
 
-// Llamar a la función al arrancar para inicializar el título de la primera caja
+// Inicializar los números de clases al cargar la página
 renombrarClasesVisualmente();
 
-// Función para procesar y enviar la petición al backend
-// Función para procesar y enviar la petición al backend
+// Procesa y envía la petición de provisión de slice al controlador
 async function submitSlice(event) {
-    // Bloqueamos el recargo automático de la página web al pulsar el botón
+    // Prevenir recarga automática de la página
     if (event) {
         event.preventDefault();
     }
 
     const delayInputs = document.querySelectorAll('input[name="delay"]');
     
-    // Mapear los valores de delay a su clase (TNA, TNB, TNC, TND)
+    // Mapear valores de latencia a categorías SLA estándar
     const tiposSeleccionados = Array.from(delayInputs).map(input => {
         const d = parseFloat(input.value);
         if (d <= 5) return "URLLC";
@@ -62,7 +61,7 @@ async function submitSlice(event) {
 
     const tiposUnicos = new Set(tiposSeleccionados);
 
-    // Validación de integridad del modelo HCTNS
+    // Validación de modelo HCTNS: evitar múltiples flujos con igual latencia
     if (tiposSeleccionados.length !== tiposUnicos.size) {
         alert("Error de Diseño HCTNS: No puedes asignar dos flujos con la misma categoría de latencia dentro de la misma Slice. Esto rompería el aislamiento en el router frontera.");
         return;
@@ -73,7 +72,7 @@ async function submitSlice(event) {
     resultBox.className = '';
     resultBox.innerHTML = "⏳ Evaluando Control de Admisión...";
 
-    // Construir el JSON exacto que espera FastAPI (Dejamos que el Backend asigne la VLAN)
+    // Construir la solicitud para el backend
     const payload = {
         "network_slice": {
             "id": "auto",
@@ -100,7 +99,7 @@ async function submitSlice(event) {
     });
 
     try {
-        // Enviar la petición POST al backend
+        // Enviar solicitud al controlador SDN
         const response = await fetch('/provision_slice', {
             method: 'POST',
             headers: {
@@ -111,27 +110,26 @@ async function submitSlice(event) {
 
         const data = await response.json();
 
-        // Mostrar si se acepta o rechaza, leyendo la VLAN directamente del controlador SDN
+        // Mostrar resultado basado en la respuesta del controlador
         if (response.ok) {
             resultBox.className = 'success';
             resultBox.innerHTML = `✅ ¡Aceptado! Slice (VLAN ${data.slice_id}) creada.<br>Ruta asignada: ${data.ruta_elegida.join(' ➔ ')}`;
 
-            // Localizamos el contenedor vacío en el HTML
+            // Agregar tarjeta visual de la nueva slice
             const activeSlicesContainer = document.getElementById('slicesActivasContainer');
             
             if (activeSlicesContainer) {
-                // Creamos un nuevo Div para la Slice
                 const nuevaSlice = document.createElement('div');
                 nuevaSlice.className = 'slice-card'; 
                 
-                // Dibujamos el HTML interno inyectando la variable dinámica ${data.slice_id}
+                // Inyectar información dinámica de la slice
                 nuevaSlice.innerHTML = `
                     <h4>🌐 Slice VLAN ${data.slice_id}</h4>
                     <p><strong>Ruta asignada:</strong> ${data.ruta_elegida.join(' ➔ ')}</p>
                     <button class="btn-remove-slice" onclick="eliminarSliceWeb('${data.slice_id}', this)">🗑️ Eliminar</button>
                 `;
                 
-                // Lo añadimos a la pantalla
+                // Agregar al contenedor
                 activeSlicesContainer.appendChild(nuevaSlice);
             }
 
@@ -145,7 +143,7 @@ async function submitSlice(event) {
     }
 }
 
-// Función para eliminar una Slice Activa y liberar recursos en los routers físicos
+// Elimina una slice activa y libera los recursos en los routers
 async function eliminarSliceWeb(slice_id, btnElement) {
     if (!confirm(`¿Estás seguro de que quieres eliminar la Slice VLAN ${slice_id} y destruir sus colas?`)) {
         return;
@@ -157,7 +155,7 @@ async function eliminarSliceWeb(slice_id, btnElement) {
         });
 
         if (response.ok) {
-            // Borra la caja visual de la web (adaptado a tu clase css 'slice-card' o 'qos-class')
+            // Remover la tarjeta visual de la slice desde el DOM
             btnElement.closest('div').remove(); 
             alert(`✅ Slice ${slice_id} eliminada. Colas destruidas y recursos físicos liberados.`);
         } else {
