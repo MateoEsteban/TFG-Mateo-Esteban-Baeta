@@ -23,38 +23,49 @@ def control_de_admision(G, origen, destino, req_cir, req_delay):
     """
     Verifica si existe una ruta disponible que cumpla los requisitos
     de ancho de banda y latencia máxima utilizando Networkx.
-    
+
     Devuelve la ruta (lista de nodos) si cumple los requisitos, None si no hay ruta disponible.
     """
     print(f"\n[PCE] Ejecutando Control de Admisión -> Requisitos: {req_cir} Mbps | Latencia Máx: {req_delay} ms")
-    
+
     try:
-        caminos_posibles = list(nx.all_simple_paths(G, source=origen, target=destino))
+        # Obtener todos los caminos posibles
+        caminos = list(nx.all_simple_paths(G, source=origen, target=destino))
     except nx.NetworkXNoPath:
-        print("❌ [PCE] Error: No existe conectividad física entre el origen y el destino.")
         return None
 
-    # Ordenar rutas por latencia total (de menor a mayor)
-    caminos_posibles.sort(key=lambda c: sum(G[c[i]][c[i+1]]['delay'] for i in range(len(c)-1)))
-    
-    for camino in caminos_posibles:
+    caminos_validos = []
+
+    # Evaluar restricciones de SLA en cada ruta
+    for camino in caminos:
         delay_total = 0
         bw_minimo = float('inf')
-        
-        # Calcular métricas del camino
-        for i in range(len(camino)-1):
+
+        # Extraer métricas del camino candidato
+        for i in range(len(camino) - 1):
             u, v = camino[i], camino[i+1]
             delay_total += G[u][v]['delay']
             bw_minimo = min(bw_minimo, G[u][v]['bandwidth'])
-            
-        # Validar si el camino satisface los requisitos SLA
+
+        # Validacion estricta: Si cumple, guardamos la tupla con TRES elementos
         if delay_total <= req_delay and bw_minimo >= req_cir:
-            print(f"✅ [PCE] ¡ACEPTADO! Ruta válida encontrada: {camino}")
-            print(f" -> Rendimiento proyectado de la ruta: Latencia {delay_total}ms | BW Mínimo {bw_minimo}Mbps")
-            return camino
-            
-    print("❌ [PCE] DESESTIMADA. Ningún camino en la red dispone de los recursos suficientes para el SLA.")
-    return None
+            caminos_validos.append((camino, delay_total, bw_minimo))
+
+    # Si ningún camino superó el filtro, se rechaza la petición
+    if not caminos_validos:
+        print("❌ [PCE] DESESTIMADA. Ningún camino en la red dispone de los recursos suficientes para el SLA.")
+        return None
+
+    # Ordenar solo los caminos válidos por latencia (índice 1 de la tupla)
+    caminos_validos.sort(key=lambda x: x[1])
+
+    # Desempaquetar los TRES valores directamente del ganador (sin recalcular nada)
+    mejor_ruta, mejor_delay, bw_minimo_mejor = caminos_validos[0]
+    
+    print(f"✅ [PCE] ¡ACEPTADO! Ruta válida encontrada: {mejor_ruta}")
+    print(f" -> Rendimiento proyectado de la ruta: Latencia {mejor_delay}ms | BW Mínimo {bw_minimo_mejor}Mbps")
+    
+    return mejor_ruta
 
 def actualizar_networkinfo(ruta_asignada, req_cir, archivo="networkinfo.json"):
     """
