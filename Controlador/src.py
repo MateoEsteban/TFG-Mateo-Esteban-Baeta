@@ -34,8 +34,17 @@ def inicializar_qos_base_borde(nodo):
         "ovs-vsctl add-port br0 int0 -- set interface int0 type=internal 2>/dev/null",
         "ip link set int0 up 2>/dev/null",
         "ip link set br0 up 2>/dev/null",
+        
+        # Base QoS Ingreso (int0) - HTB
         "tc qdisc add dev int0 root handle 1: htb default 10 2>/dev/null",
         "tc class add dev int0 parent 1: classid 1:1 htb rate 1gbit 2>/dev/null",
+        
+        # NUEVO: Base QoS Egreso hacia Acceso (eth1) - DRR (Nivel 0)
+        "tc qdisc add dev eth1 root handle 1: htb default 1 2>/dev/null",
+        "tc class add dev eth1 parent 1: classid 1:1 htb rate 1gbit 2>/dev/null",
+        "tc qdisc add dev eth1 parent 1:1 handle 10: drr 2>/dev/null",
+
+        # Base QoS Salida Norte (eth2)
         "tc qdisc add dev eth2 root handle 1: htb default 1 2>/dev/null",
         "tc class add dev eth2 parent 1: classid 1:1 htb rate 1gbit 2>/dev/null",
         "tc qdisc add dev eth2 parent 1:1 handle 2: prio 2>/dev/null",
@@ -43,6 +52,8 @@ def inicializar_qos_base_borde(nodo):
         "tc class add dev eth2 parent 20: classid 20:1 drr quantum 1538 2>/dev/null",
         "tc class add dev eth2 parent 20: classid 20:2 drr quantum 1538 2>/dev/null",
         "tc class add dev eth2 parent 20: classid 20:3 drr quantum 1538 2>/dev/null",
+        
+        # Base QoS Salida Sur (eth3)
         "tc qdisc add dev eth3 root handle 1: htb default 1 2>/dev/null",
         "tc class add dev eth3 parent 1: classid 1:1 htb rate 1gbit 2>/dev/null",
         "tc qdisc add dev eth3 parent 1:1 handle 2: prio 2>/dev/null",
@@ -128,15 +139,15 @@ def configurar_extremos_acceso(nodo_cliente, nodo_servidor, vlan_id, qos_classes
         ejecutar(nodo_servidor, cmd)
 
 def configurar_routers_borde(vlan_id, req_cir_total, qos_classes, ruta_ida_sids, ruta_vuelta_sids, req_delay_min):
-    """ Configura RG y RU mapeando a IDs de cola normales infiriendo el comportamiento """
+    """
+    Configura RG y RU: Puente OVS, VLANs, rutas SRv6 dinámicas y QoS Fina.
+    """
     iface_salida_rg = "eth3" if "fcff:4::1" in ruta_ida_sids else "eth2"
     iface_salida_ru = "eth3" if "fcff:4::1" in ruta_vuelta_sids else "eth2"
-    
-    # 1. SOLUCIÓN COLISIÓN: Sumamos 1 al último dígito para que VLAN 3001 sea 1:2
+
     sub_clase = str(int(str(vlan_id)[-1]) + 1)
-    
-    # 2. SOLUCIÓN BURST PADRE: Sumamos el burst de todas las clases hijas
     req_burst_total = sum(int(cls_data.get("burst", 1500)) for cls_data in qos_classes.values())
+    qdisc_nivel2 = f"{sub_clase}0"
 
     cmds_rg = [
         f"ip link add link int0 name int0.{vlan_id} type vlan id {vlan_id} 2>/dev/null",
@@ -144,29 +155,40 @@ def configurar_routers_borde(vlan_id, req_cir_total, qos_classes, ruta_ida_sids,
         f"ip link set int0.{vlan_id} up",
         f"ip -6 route replace fd00:{vlan_id}:a::/64 via fd00:{vlan_id}:b::1 dev int0.{vlan_id}",
         f"ip -6 route replace fd00:{vlan_id}:d::/64 encap seg6 mode encap segs {ruta_ida_sids} dev {iface_salida_rg}",
-        # Añadido el burst total a la cola padre
+        
+        # HTB Nivel 1 (Subida)
         f"tc class replace dev int0 parent 1:1 classid 1:{sub_clase} htb rate {req_cir_total}mbit burst {req_burst_total}b",
-        f"tc filter replace dev int0 protocol 802.1Q parent 1:0 prio 1 flower vlan_id {vlan_id} classid 1:{sub_clase}"
+        f"tc filter replace dev int0 protocol 802.1Q parent 1:0 prio {sub_clase} flower vlan_id {vlan_id} classid 1:{sub_clase}",
+        
+        # DRR Nivel 1 (Bajada) - CORREGIDO EL PARENT A 10:0
+        f"tc class replace dev eth1 parent 10: classid 10:{sub_clase} drr quantum 1538",
+        f"tc qdisc replace dev eth1 parent 10:{sub_clase} handle {qdisc_nivel2}: drr",
+        f"tc filter replace dev eth1 protocol 802.1Q parent 10:0 prio {sub_clase} flower vlan_id {vlan_id} classid 10:{sub_clase}"
     ]
-    
+
     cmds_ru = [
         f"ip link add link int0 name int0.{vlan_id} type vlan id {vlan_id} 2>/dev/null",
         f"ip -6 addr add fd00:{vlan_id}:c::2/64 dev int0.{vlan_id} 2>/dev/null",
         f"ip link set int0.{vlan_id} up",
         f"ip -6 route replace fd00:{vlan_id}:d::/64 via fd00:{vlan_id}:c::1 dev int0.{vlan_id}",
         f"ip -6 route replace fd00:{vlan_id}:a::/64 encap seg6 mode encap segs {ruta_vuelta_sids} dev {iface_salida_ru}",
-        # Añadido el burst total a la cola padre
+        
+        # HTB Nivel 1 (Subida)
         f"tc class replace dev int0 parent 1:1 classid 1:{sub_clase} htb rate {req_cir_total}mbit burst {req_burst_total}b",
-        f"tc filter replace dev int0 protocol 802.1Q parent 1:0 prio 1 flower vlan_id {vlan_id} classid 1:{sub_clase}"
+        f"tc filter replace dev int0 protocol 802.1Q parent 1:0 prio {sub_clase} flower vlan_id {vlan_id} classid 1:{sub_clase}",
+        
+        # DRR Nivel 1 (Bajada) - CORREGIDO EL PARENT A 10:0
+        f"tc class replace dev eth1 parent 10: classid 10:{sub_clase} drr quantum 1538",
+        f"tc qdisc replace dev eth1 parent 10:{sub_clase} handle {qdisc_nivel2}: drr",
+        f"tc filter replace dev eth1 protocol 802.1Q parent 10:0 prio {sub_clase} flower vlan_id {vlan_id} classid 10:{sub_clase}"
     ]
-    
+
     cola_hija_idx = 0
     for cls_name, cls_data in qos_classes.items():
         req_delay = float(cls_data.get("delay", 100))
         cir = cls_data.get("cir", 50)
         burst = cls_data.get("burst", 1500)
-        
-        # Mapeo Inteligente basado en el Draft IETF
+
         if req_delay <= 5:
             dscp_int, dscp_ext = "0x30", "0x04"
         elif req_delay <= 20:
@@ -175,46 +197,58 @@ def configurar_routers_borde(vlan_id, req_cir_total, qos_classes, ruta_ida_sids,
             dscp_int, dscp_ext = "0x12", "0x02"
         else:
             dscp_int, dscp_ext = "0x00", "0x01"
-            
+
         cola_hija = f"1:{sub_clase}{cola_hija_idx}"
-        
-        # Inyectar reglas HTB leyendo DSCP Interno e incluyendo el burst individual
+        cola_hija_drr = f"{qdisc_nivel2}:{cola_hija_idx + 1}"
+
         cmds_rg.extend([
             f"tc class replace dev int0 parent 1:{sub_clase} classid {cola_hija} htb rate {cir}mbit burst {burst}b",
-            f"tc filter replace dev int0 protocol 802.1Q parent 1:{sub_clase} prio 1 u32 match ip6 priority {dscp_int} 0xff classid {cola_hija}"
+            f"tc filter replace dev int0 protocol 802.1Q parent 1:{sub_clase} prio 1 u32 match ip6 priority {dscp_int} 0xff classid {cola_hija}",
+            f"tc class replace dev eth1 parent {qdisc_nivel2}: classid {cola_hija_drr} drr quantum 1538",
+            f"tc filter replace dev eth1 protocol 802.1Q parent {qdisc_nivel2}:0 prio 1 u32 match ip6 priority {dscp_int} 0xff classid {cola_hija_drr}"
         ])
-        
+
         cmds_ru.extend([
             f"tc class replace dev int0 parent 1:{sub_clase} classid {cola_hija} htb rate {cir}mbit burst {burst}b",
-            f"tc filter replace dev int0 protocol 802.1Q parent 1:{sub_clase} prio 1 u32 match ip6 priority {dscp_int} 0xff classid {cola_hija}"
+            f"tc filter replace dev int0 protocol 802.1Q parent 1:{sub_clase} prio 1 u32 match ip6 priority {dscp_int} 0xff classid {cola_hija}",
+            f"tc class replace dev eth1 parent {qdisc_nivel2}: classid {cola_hija_drr} drr quantum 1538",
+            f"tc filter replace dev eth1 protocol 802.1Q parent {qdisc_nivel2}:0 prio 1 u32 match ip6 priority {dscp_int} 0xff classid {cola_hija_drr}"
         ])
-        
-        # Inyectar reglas Egreso (Granularidad Gruesa) usando las interfaces calculadas
+
         if dscp_ext == "0x04":
             cmds_rg.append(f"tc filter replace dev {iface_salida_rg} protocol ipv6 parent 2:0 prio 1 u32 match ip6 priority {dscp_int} 0xff action pedit ex munge ip6 traffic_class set {dscp_ext} classid 2:1")
             cmds_ru.append(f"tc filter replace dev {iface_salida_ru} protocol ipv6 parent 2:0 prio 1 u32 match ip6 priority {dscp_int} 0xff action pedit ex munge ip6 traffic_class set {dscp_ext} classid 2:1")
         else:
             cola_drr = "20:1" if dscp_ext == "0x03" else ("20:2" if dscp_ext == "0x02" else "20:3")
             prio_filter = 2 if dscp_ext == "0x03" else (3 if dscp_ext == "0x02" else 4)
-            
+
             cmds_rg.extend([
                 f"tc filter replace dev {iface_salida_rg} protocol ipv6 parent 2:0 prio 2 u32 match ip6 priority {dscp_int} 0xff classid 2:3",
                 f"tc filter replace dev {iface_salida_rg} protocol ipv6 parent 20:0 prio {prio_filter} u32 match ip6 priority {dscp_int} 0xff action pedit ex munge ip6 traffic_class set {dscp_ext} classid {cola_drr}"
             ])
-            
             cmds_ru.extend([
                 f"tc filter replace dev {iface_salida_ru} protocol ipv6 parent 2:0 prio 2 u32 match ip6 priority {dscp_int} 0xff classid 2:3",
                 f"tc filter replace dev {iface_salida_ru} protocol ipv6 parent 20:0 prio {prio_filter} u32 match ip6 priority {dscp_int} 0xff action pedit ex munge ip6 traffic_class set {dscp_ext} classid {cola_drr}"
             ])
-            
+
         cola_hija_idx += 1
-        
+
+    # Filtros comodín (fallback) para int0 y eth1 para evitar que se descarte la señalización NDP/ARP
+    cmds_rg.extend([
+        f"tc filter replace dev eth1 protocol 802.1Q parent {qdisc_nivel2}:0 prio 99 u32 match u32 0 0 classid {qdisc_nivel2}:1",
+        f"tc filter replace dev int0 protocol 802.1Q parent 1:{sub_clase} prio 99 u32 match u32 0 0 classid 1:{sub_clase}0"
+    ])
+    cmds_ru.extend([
+        f"tc filter replace dev eth1 protocol 802.1Q parent {qdisc_nivel2}:0 prio 99 u32 match u32 0 0 classid {qdisc_nivel2}:1",
+        f"tc filter replace dev int0 protocol 802.1Q parent 1:{sub_clase} prio 99 u32 match u32 0 0 classid 1:{sub_clase}0"
+    ])
+
+    # Ejecutar comandos generados
     for cmd in cmds_rg:
         ejecutar('rg', cmd)
-        
     for cmd in cmds_ru:
         ejecutar('ru', cmd)
-
+        
 def inyectar_comandos_router(slice_id, req_cir_total, ruta_asignada, req_delay_min, qos_classes):
     """ Orquesta la red desde cero """
     print(f"\n[SRC] === INICIANDO APROVISIONAMIENTO ZTP (Zero-Touch) ===")
@@ -259,20 +293,35 @@ def eliminar_comandos_router(slice_id, ruta_asignada):
     
     # Extraer el classid de la VLAN corrigiendo la colisión (+1)
     sub_clase = str(int(str(slice_id)[-1]) + 1)
-
+    qdisc_nivel2 = f"{sub_clase}0"
+    
     # ---------------------------------------------------------
     # 1. LIMPIEZA EN LOS ROUTERS FRONTERA (rg y ru)
     # ---------------------------------------------------------
     cmds_limpieza_borde = [
+        # Limpieza Filtros int0 (Subida - HTB)
         f"tc filter del dev int0 parent 1:{sub_clase} 2>/dev/null",
-        f"tc filter del dev int0 protocol 802.1Q parent 1:0 prio 1 flower vlan_id {slice_id} 2>/dev/null"
+        f"tc filter del dev int0 protocol 802.1Q parent 1:0 prio {sub_clase} 2>/dev/null", # CORREGIDO: usa la prioridad dinámica
+        
+        # Limpieza Filtros eth1 (Bajada - DRR)
+        f"tc filter del dev eth1 parent {qdisc_nivel2}:0 2>/dev/null",
+        f"tc filter del dev eth1 protocol 802.1Q parent 10:0 prio {sub_clase} 2>/dev/null",
+        
+        # Destruir qdisc Nivel 2 en eth1 (esto destruye sus colas hijas automáticamente)
+        f"tc qdisc del dev eth1 parent 10:{sub_clase} handle {qdisc_nivel2}: 2>/dev/null"
     ]
 
+    # Limpieza Colas hijas (HTB y respaldo manual para DRR)
     for i in range(10):
         cmds_limpieza_borde.append(f"tc class del dev int0 classid 1:{sub_clase}{i} 2>/dev/null")
-
-    cmds_limpieza_borde.append(f"tc class del dev int0 classid 1:{sub_clase} 2>/dev/null")
-    cmds_limpieza_borde.append(f"ip link del int0.{slice_id} 2>/dev/null")
+        cmds_limpieza_borde.append(f"tc class del dev eth1 classid {qdisc_nivel2}:{i} 2>/dev/null")
+        
+    # Limpieza Colas padre y subinterfaz
+    cmds_limpieza_borde.extend([
+        f"tc class del dev int0 classid 1:{sub_clase} 2>/dev/null",
+        f"tc class del dev eth1 classid 10:{sub_clase} 2>/dev/null",
+        f"ip link del int0.{slice_id} 2>/dev/null"
+    ])
 
     for cmd in cmds_limpieza_borde:
         ejecutar('rg', cmd)
@@ -283,24 +332,22 @@ def eliminar_comandos_router(slice_id, ruta_asignada):
     # ---------------------------------------------------------
     # Al borrar las VLANs eth1.X y eth2.X, Linux borra automáticamente las IPs y las rutas de la tabla.
     # Solo las reglas PBR (ip -6 rule) requieren un borrado explícito.
-    
     cmds_rgnb = [
         f"ip -6 rule del from fd00:{slice_id}:a::/64 lookup {slice_id} 2>/dev/null",
         f"ip link del eth1.{slice_id} 2>/dev/null",
         f"ip link del eth2.{slice_id} 2>/dev/null"
     ]
-    
+
     cmds_rupf = [
         f"ip -6 rule del from fd00:{slice_id}:d::/64 lookup {slice_id} 2>/dev/null",
         f"ip link del eth1.{slice_id} 2>/dev/null",
         f"ip link del eth2.{slice_id} 2>/dev/null"
     ]
-    
+
     for cmd in cmds_rgnb:
         ejecutar('rgnb', cmd)
-        
     for cmd in cmds_rupf:
         ejecutar('rupf', cmd)
 
-    print(f"[SRC] ✅ Colas HTB, filtros y subinterfaz VLAN {slice_id} destruidas en borde y acceso.")
+    print(f"[SRC] ✅ Colas HTB, DRR, filtros y subinterfaz VLAN {slice_id} destruidas en borde y acceso.")
     return True

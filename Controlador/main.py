@@ -67,7 +67,7 @@ async def provision_slice(peticion: dict):
         }
 
         # Actualizar los recursos disponibles en la topología de red
-        pce.actualizar_networkinfo(ruta_asignada, req_cir_total)
+        pce.actualizar_networkinfo(ruta_asignada, req_cir_fisico)
 
         # Inyectar la configuración de la slice en los routers especificados
         exito = src.inyectar_comandos_router(vlan_asignada, req_cir_total, ruta_asignada, req_delay_min, qos_classes)
