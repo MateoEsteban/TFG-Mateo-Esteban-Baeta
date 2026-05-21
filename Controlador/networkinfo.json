@@ -26,25 +26,25 @@
             {
                 "source": "rg",
                 "target": "r1",
-                "bandwidth": 1000,
+                "bandwidth": 1000.0,
                 "delay": 5
             },
             {
                 "source": "r1",
                 "target": "r2",
-                "bandwidth": 1000,
+                "bandwidth": 1000.0,
                 "delay": 5
             },
             {
                 "source": "r2",
                 "target": "r3",
-                "bandwidth": 1000,
+                "bandwidth": 1000.0,
                 "delay": 5
             },
             {
                 "source": "r3",
                 "target": "ru",
-                "bandwidth": 1000,
+                "bandwidth": 1000.0,
                 "delay": 5
             },
             {

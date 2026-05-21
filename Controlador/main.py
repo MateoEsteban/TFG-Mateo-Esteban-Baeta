@@ -66,6 +66,12 @@ async def provision_slice(peticion: dict):
             "cir": req_cir_total
         }
 
+        # Suma el CIR de todas las slices activas
+        cir_global_red = sum(s["cir"] for s in active_slices.values())
+        # Elige el máximo entre 1000 Mbps (1 Gbps base) o la suma de las Slices
+        limite_global = max(1000, int(cir_global_red))
+        src.actualizar_limite_global(limite_global)
+
         # Actualizar los recursos disponibles en la topología de red
         pce.actualizar_networkinfo(ruta_asignada, req_cir_fisico)
 
@@ -105,6 +111,11 @@ async def delete_slice(slice_id: str):
         # Remover la slice de la memoria del controlador
         if slice_id in active_slices:
             del active_slices[slice_id]
+            
+            # NUEVO: Reajuste dinámico del Policer Global al borrar (Petición de Aitor)
+            cir_global_red = sum(s["cir"] for s in active_slices.values())
+            limite_global = max(1000, int(cir_global_red))
+            src.actualizar_limite_global(limite_global)
             
         print(f"[API] ✅ Slice {slice_id} eliminada completamente de la red y la memoria.")
         return {"mensaje": f"Recursos de la VLAN {slice_id} liberados correctamente"}

@@ -351,3 +351,9 @@ def eliminar_comandos_router(slice_id, ruta_asignada):
 
     print(f"[SRC] ✅ Colas HTB, DRR, filtros y subinterfaz VLAN {slice_id} destruidas en borde y acceso.")
     return True
+
+def actualizar_limite_global(limite_mbit):
+    """ Ajusta dinámicamente el Policer Global (1:1) si se supera 1 Gbps (Petición de Aitor) """
+    cmd = f"tc class replace dev int0 parent 1: classid 1:1 htb rate {limite_mbit}mbit"
+    ejecutar('rg', cmd)
+    ejecutar('ru', cmd)
