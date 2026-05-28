@@ -121,14 +121,29 @@ async function submitSlice(event) {
             if (activeSlicesContainer) {
                 const nuevaSlice = document.createElement('div');
                 nuevaSlice.className = 'slice-card'; 
-                
+                //Extraer datos del payload para el resumen
+                const clasesQoS = payload.network_slice["5G_qos_classes"];
+                const numClases = Object.keys(clasesQoS).length;
+                let sumaCir = 0;
+                let retardoMinimo = Infinity;
+
+                for (const key in clasesQoS) {
+                    sumaCir += clasesQoS[key].cir;
+                    if (clasesQoS[key].delay < retardoMinimo) {
+                        retardoMinimo = clasesQoS[key].delay;
+                    }
+                }
+
                 // Inyectar información dinámica de la slice
                 nuevaSlice.innerHTML = `
                     <h4>🌐 Slice VLAN ${data.slice_id}</h4>
                     <p><strong>Ruta asignada:</strong> ${data.ruta_elegida.join(' ➔ ')}</p>
+                    <p><strong>Número de Clases QoS:</strong> ${numClases}</p>
+                    <p><strong>Suma CIR:</strong> ${sumaCir}</p>
+                    <p><strong>Retardo Mínimo:</strong> ${retardoMinimo}</p>
                     <button class="btn-remove-slice" onclick="eliminarSliceWeb('${data.slice_id}', this)">🗑️ Eliminar</button>
                 `;
-                
+
                 // Agregar al contenedor
                 activeSlicesContainer.appendChild(nuevaSlice);
             }
